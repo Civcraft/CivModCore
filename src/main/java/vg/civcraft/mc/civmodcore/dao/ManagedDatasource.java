@@ -4,7 +4,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
-
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -19,40 +18,45 @@ import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+
 import vg.civcraft.mc.civmodcore.ACivMod;
 
 /**
  * Plugins should replace their custom Database handlers with an instance of ManagedDatasource.
- * 
- * See the {@link #ManagedDatasource} constructor for details on how to use the ManagedDatasource.
- * 
+ * <br /><br />
+ * See the {@link #ManagedDatasource(ACivMod, String, String, String, int, String, int, long, long, long)} constructor for details on how to use the ManagedDatasource.
+ * <br /><br />
  * To convert existing plugins, do the following:
- *
- *   1. Take existing database version code and refactor it.
- *      a. Any CREATE, UPDATE, ALTER, or similar statements, convert to a List of Strings and pass
+ * <br /><br />
+ * <ol>
+ *   <li> Take existing database version code and refactor it.
+ *      <ol><li> Any CREATE, UPDATE, ALTER, or similar statements, convert to a List of Strings and pass
  *         them into ManagedDatasource as a Migration using {@link #registerMigration(Integer, boolean, String...)}
- *      b. Find your prepared statements. Convert the string resources as static final in your plugin's DAO layer.
- *      c. Remove any "is database alive" check code. It's not needed.
- *      d. Remove any version management code that remains
- *      e. DO react to the results of the {@link #upgradeDatabase} call. 
- *         i.   If false is returned, terminate your plugin.
- *         ii.  If false is returned and your plugin is critical to a host of other plugins, terminate the server.
- *         iii. If an Exception is thrown, I strongly recommend you consider it a "false" return value and react accordingly.
- *      f. Note: Create a "first" migration at index -1 that ignores errors and copies any "current" migration state data
+ *      <li> Find your prepared statements. Convert the string resources as static final in your plugin's DAO layer.
+ *      <li> Remove any "is database alive" check code. It's not needed.
+ *      <li> Remove any version management code that remains
+ *      <li> DO react to the results of the {@link #upgradeDatabase} call. 
+ *         <ol><li>   If false is returned, terminate your plugin.
+ *         <li>  If false is returned and your plugin is critical to a host of other plugins, terminate the server.
+ *         <li> If an Exception is thrown, I strongly recommend you consider it a "false" return value and react accordingly.
+ *      </ol><li> Note: Create a "first" migration at index -1 that ignores errors and copies any "current" migration state data
  *         from the db_version or equivalent table into the <code>managed_plugin_data</code> table. 
- *  2. Throughout your plugin, ensure that PreparedStatements are "created" new each request and against a 
+ *  </ol><li> Throughout your plugin, ensure that PreparedStatements are "created" new each request and against a 
  *     newly retrieved Connection (using {@link #getConnection()} of this class). Don't worry about PrepareStatements.
  *     The driver will manage caching them efficiently.
- *  3. Make sure you release Connections using {@link Connection#close()} as soon as you can (when done with them). 
+ *  <li> Make sure you release Connections using {@link Connection#close()} as soon as you can (when done with them). 
  *     a. Don't hold on to Connections. 
  *     b. Close them. 
  *     c. Use "try-with-resources" where-ever possible so that they are auto-closed.
- *  4. If you have loops to insert a bunch of similar records, convert it to a batch. Find instructions in {@link #ManagedDatasource}.
- *  5. If you have special needs like atomic multi-statement, do all your work on a single Connection and return it to 
+ *  <li> If you have loops to insert a bunch of similar records, convert it to a batch. Find instructions in {@link #ManagedDatasource}.
+ *  <li> If you have special needs like atomic multi-statement, do all your work on a single Connection and return it to 
  *     a clean state when you are done. (turn auto-commit back on, ensure all transactions are committed, etc.)
- *
+ *</ol>
+ * <br /><br />
  * That should cover most cases. Note that points 2 & 3 are critical. Point 1 is required. Point 4 and 5 are highly recommended.
- * 
+ * <br /><br />
  * TODO: Make this instantiable via ConfigurationSerializable interface.
  *
  * @author ProgrammerDan
@@ -62,7 +66,8 @@ public class ManagedDatasource {
 	private static final long MAX_WAIT_FOR_LOCK = 600000l;
 	private static final long WAIT_PERIOD = 500l;
 	
-	private ConnectionPool connections;
+	private HikariDataSource connections;
+	private HikariConfig config;
 	private Logger logger;
 	private ACivMod plugin;
 	
@@ -111,18 +116,18 @@ public class ManagedDatasource {
 
 	/**
 	 * Create a new ManagedDatasource.
-	 * 
+	 * <br /><br />
 	 * After creating, a plugin should register its migrations, which are just numbered "sets" of queries to run.
-	 * 
+	 * <br /><br />
 	 * Use {@link #registerMigration(int, boolean, Callable, String...)} to add a new migration.
-	 * 
+	 * <br /><br />
 	 * When you are done adding, call {@link #updateDatabase()} which gets a lock on migrating for this
 	 *   plugin, then checks if any migrations need to be applied, and applies as needed.
-	 *   
+	 * <br /><br />
 	 * Now, your database connection pool will be ready to use! 
-	 * 
+	 * <br /><br />
 	 * Don't worry about "pre-preparing" statements. Just use the following pattern:
-	 * 
+	 * <br /><br />
 	 * <code>
 	 *   try (Connection connection = myManagedDatasource.getConnection();
 	 *   		PreparedStatement statement = connection.prepareStatement("SELECT * FROM sample;");) {
@@ -131,12 +136,12 @@ public class ManagedDatasource {
 	 *   	// code that alerts on failure
 	 *   }
 	 * </code>
-	 * 
+	 * <br /><br />
 	 * Or similar w/ normal Statements. This is a try-with-resources block, and it ensures that once
 	 *   the query is complete (even if it errors!) all resources are "closed". In the case of the 
 	 *   connection pool, this just returns the connection back to the connection pool for use
 	 *   elsewhere.
-	 *   
+	 * <br /><br />
 	 * If you want to batch, just use a PreparedStatement as illustrated above, and use 
 	 *   <code>.addBatch();</code> on it after adding each set of parameters. When you are done,
 	 *   call <code>.executeBatch();</code> and all the statements will be executed in order.
@@ -156,10 +161,86 @@ public class ManagedDatasource {
 	 */
 	public ManagedDatasource(ACivMod plugin, String user, String pass, String host, int port, String database,
 			int poolSize, long connectionTimeout, long idleTimeout, long maxLifetime) {
+		this(plugin, constructStandardConfig(user, pass, host, port, database, poolSize, 
+				connectionTimeout, idleTimeout, maxLifetime));
+	}
+	
+	/**
+	 * Easy utility method to construct a standard HikariConfig for MySQL databases.
+	 * Some defaults will be applied if advanced parameters are missing, but if user, host, port, or database
+	 * aren't set, a runtime exception will result.
+	 * <br /><br />
+	 * Note this does configure the prepared statement cache, assuming we're using a driver that supports it.
+	 * By default, the cache size is 250 and the maximum size of the statement we'll cache is 2048 characters.
+	 * <br /><br />
+	 * If these options won't work for you, make a HikariConfig of your own devising.
+	 *  
+	 * @param user The SQL user to connect with
+	 * @param pass The password to connect with
+	 * @param host The host name / IP of the database server
+	 * @param port The port to connection to
+	 * @param database The name of the database file
+	 * @param poolSize The max # of concurrent connections available in the pool (if null, 10)
+	 * @param connectionTimeout The length of time to wait for an active query to return (if null, 1000)
+	 * @param idleTimeout The length of time a connection can wait unused before being recycled (if null, 600000)
+	 * @param maxLifetime The absolute length of time a connection is allowed to live in the pool (if null, 7200000)
+	 * @return A new HikariConfig for the described datasource.
+	 */
+	public static HikariConfig constructStandardConfig(String user, String pass, String host, int port, String database,
+			Integer poolSize, Long connectionTimeout, Long idleTimeout, Long maxLifetime) {
+		if (user != null && host != null && port > 0 && database != null) {
+			HikariConfig config = new HikariConfig();
+			config.setJdbcUrl("jdbc:mysql://" + host + ":" + port + "/" + database);
+			if (poolSize == null) poolSize = 10;
+			if (connectionTimeout == null) connectionTimeout = 1000l;
+			if (idleTimeout == null) idleTimeout = 600000l;
+			if (maxLifetime == null) maxLifetime = 7200000l;
+			config.setConnectionTimeout(connectionTimeout);
+			config.setIdleTimeout(idleTimeout);
+			config.setMaxLifetime(maxLifetime);
+			config.setMaximumPoolSize(poolSize);
+			config.setUsername(user);
+			config.addDataSourceProperty("cachePrepStmts", "true");
+			config.addDataSourceProperty("prepStmtCacheSize", "250");
+			config.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
+			if (pass != null) {
+				config.setPassword(pass);
+			}
+			return config;
+		} else {
+			throw new RuntimeException("Incomplete configuration offered");
+		}
+	}
+	
+	/**
+	 * For more advanced users; provide a custom HikariConfig configuration directly.
+	 * 
+	 * @see #ManagedDatasource(ACivMod, String, String, String, int, String, int, long, long, long) for usage details.
+	 * 
+	 * @param plugin The ACivMod that this datasource backs 
+	 * @param configuration The {@link HikariConfig} to use in building this datasource.
+	 */
+	public ManagedDatasource(ACivMod plugin, HikariConfig configuration) {
 		this.plugin = plugin;
 		this.logger = plugin.getLogger();
-		this.connections = new ConnectionPool(logger, user, pass, host, port, database, poolSize, 
-				connectionTimeout, idleTimeout, maxLifetime);
+
+		if (configuration != null) {
+			this.config = configuration;
+	
+			this.connections = new HikariDataSource(this.config);
+			
+			// quick sanity test.
+			try (Connection connection = getConnection();
+					Statement statement = connection.createStatement();) {
+				statement.executeQuery("SELECT 1");
+			} catch (SQLException se) {
+				logger.log(Level.SEVERE, "Unable to initialize Database", se);
+				this.connections = null;
+			}
+		} else {
+			this.connections = null;
+			logger.log(Level.SEVERE, "Database not configured and is unavaiable");
+		}
 		
 		this.firstMigration = Integer.MAX_VALUE;
 		this.migrations = new TreeMap<Integer, Migration>();
@@ -185,6 +266,13 @@ public class ManagedDatasource {
 		}
 	}
 	
+	/**
+	 * @see #registerMigration(int, boolean, Callable, String...)
+	 * 
+	 * @param migration
+	 * @param ignoreErrors
+	 * @param query
+	 */
 	public void registerMigration(int migration, boolean ignoreErrors, String...query) {
 		registerMigration(migration, ignoreErrors, null, query);
 	}
@@ -192,7 +280,7 @@ public class ManagedDatasource {
 	/**
 	 * ACivMod's should call this to register their migration code. After migrations are registered,
 	 * host plugins can call the {@link #updateDatabase} method to trigger each migration in turn.
-	 * 
+	 * <br /><br />
 	 * This is _not_ checked for completeness or accuracy.
 	 *  
 	 * @param migration The migration ID -- 0, 1, 2 etc.
@@ -212,23 +300,25 @@ public class ManagedDatasource {
 	 *   It applies the migrations if necessary in a "multi-tenant" safe way via a soft-lock.
 	 *   Locks have a maximum duration currently set to 8 hours, but realistically they will
 	 *   be very short. For multi-tenant updates all servers should gracefully wait in line.
-	 *
-	 * 1. Attempts to get a lock for migrations for this plugin.
-	 * 2. If unsuccessful, periodically check the lock for release.
-	 *    a. Once released, restart at 1.
-	 *    b. If Timeout occurs, return "false".
-	 * 3. If successful, check for current update level.
-	 *    a. If no record exists, start with first migration, and apply
+	 * <br /><br />
+	 * <ol>
+	 * <li> Attempts to get a lock for migrations for this plugin.
+	 * <li> If unsuccessful, periodically check the lock for release.
+	 *    <ol><li> Once released, restart at 1.
+	 *    <li> If Timeout occurs, return "false".
+	 * </ol><li> If successful, check for current update level.
+	 *    <ol><li> If no record exists, start with first migration, and apply
 	 *       in sequence from first to last, updating the migration management
 	 *       table along the way
-	 *    b. If a record exists, read which migration was completed last
-	 *       i.   If identical to "highest" registered migration level, do nothing.
-	 *       ii.  If less then "highest" registered migration level,
+	 *    <li> If a record exists, read which migration was completed last
+	 *       <ol><li>   If identical to "highest" registered migration level, do nothing.
+	 *       <li>  If less then "highest" registered migration level,
 	 *            get the tailset of migrations "after" the last completed level, and run.
-	 * 4. If no errors occurred, or this migration has errors marked ignored, return true.
-	 * 5. If errors, return false.
-	 * 6. In either case, release the lock.
-	 *  
+	 * </ol></ol><li> If no errors occurred, or this migration has errors marked ignored, return true.
+	 * <li> If errors, return false.
+	 * <li> In either case, release the lock.
+	 * </ol>
+	 * 
 	 * @return As described in the algorithm above, returns true if no errors or all ignored; 
 	 *    or false if unable to start migration in a timely fashion or errors occurred.
 	 */
@@ -392,11 +482,11 @@ public class ManagedDatasource {
 
 	/**
 	 * This attempts to acquire a lock every WAIT_PERIOD milliseconds, up to MAX_WAIT_FOR_LOCK milliseconds.
-	 * 
+	 * <br /><br />
 	 * If max wait is exhausted, throws a TimeoutException.
-	 * 
+	 * <br /><br />
 	 * If a <i>real</i> error (not failure to insert) is encountered, stops trying and throws that error.
-	 * 
+	 * <br /><br />
 	 * Otherwise, returns true when lock is acquired.
 	 * 
 	 * @return true when lock is acquired, or exception otherwise
@@ -456,9 +546,10 @@ public class ManagedDatasource {
 	}
 	
 	/**
-	 * Passthrough; gets a connection from the underlying ConnectionPool.
+	 * Passthrough; gets a connection from the underlying HikariDatasource.
+	 * <br /><br />
 	 * Simply close() it when done.
-	 * 
+	 * <br /><br />
 	 * This method _could_ briefly block while waiting for a connection. Keep this in mind.
 	 * 
 	 * @return A {@link java.sql.Connection} connection from the pool.
@@ -466,18 +557,50 @@ public class ManagedDatasource {
 	 *   error in retrieving a connection.
 	 */
 	public Connection getConnection() throws SQLException {
-		return connections.getConnection();
+		available();
+		return this.connections.getConnection();
 	}
-
-	/**
-	 * Passthrough; closes the underlying pool. Cannot be undone.
+	
+	/** 
+	 * Closes all connections and this connection pool.
 	 * 
-	 * @throws SQLException something went horribly wrong.
+	 * @throws SQLExceptionsomething went horribly wrong.
 	 */
 	public void close() throws SQLException {
-		connections.close();
+		available();
+		this.connections.close();
+		this.connections = null;
 	}
-
+	
+	/**
+	 * Quick test; either ends or throws an exception if data source isn't configured.
+	 * 
+	 * @throws SQLException
+	 */
+	public void available() throws SQLException {
+		if (this.connections == null) {
+			throw new SQLException("No Datasource Available");
+		}
+	}
+	
+	/**
+	 * Gets the underlying {@link HikariDataSource} object, if you need more advanced controls.
+	 * 
+	 * @return The real datasource; not a copy, not wrapped, so be careful.
+	 */
+	public HikariDataSource getDataSource() {
+		return this.connections;
+	}
+	
+	/**
+	 * Gets the underlying (@link HikariConfig} object, if you need advanced inspection.
+	 *
+	 * @return The real config; not a copy, not wrapped, be careful.
+	 */
+	public HikariConfig getConfig() {
+		return this.config;
+	}
+	
 	private static class Migration {
 		public LinkedList<String> migrations;
 		public boolean ignoreErrors;
@@ -488,6 +611,5 @@ public class ManagedDatasource {
 			this.ignoreErrors = ignoreErrors;
 			this.postMigration = postMigration;
 		}	
-	}
-	
+	}	
 }
