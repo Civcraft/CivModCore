@@ -27,7 +27,7 @@ public class JsonSetting extends PlayerSetting <JsonObject> {
 	@Override
 	public boolean isValidValue(String input) {
 		try {
-			JsonObject result = (JsonObject) parser.parse(input);
+			//JsonObject result = (JsonObject) parser.parse(input);
 		}
 		catch (JsonSyntaxException | ClassCastException e) {
 			return false;

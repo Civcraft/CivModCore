@@ -1,8 +1,8 @@
 name: ${project.artifactId}
 version: ${project.version}
-authors: [valadian, rourke750, ProgrammerDan, Maxopoly, DeadBeef, Protonull, Okx, mindless728, Tealnerd]
+authors: [valadian, rourke750, ProgrammerDan, Maxopoly, DeadBeef, Protonull, Okx, mindless728, Tealnerd, Scuwr]
 main: vg.civcraft.mc.civmodcore.CivModCorePlugin
-api-version: 1.14
+api-version: 1.16
 commands:
   config: {}
   configsetany:

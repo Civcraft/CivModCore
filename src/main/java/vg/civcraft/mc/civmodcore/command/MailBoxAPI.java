@@ -4,12 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-import org.bukkit.Material;
-import org.bukkit.inventory.ItemStack;
-
 import com.google.common.base.Preconditions;
 
-import vg.civcraft.mc.civmodcore.CivModCorePlugin;
 import vg.civcraft.mc.civmodcore.playersettings.PlayerSettingAPI;
 import vg.civcraft.mc.civmodcore.playersettings.impl.collection.ListSetting;
 

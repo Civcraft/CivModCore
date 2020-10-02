@@ -7,9 +7,7 @@ import java.util.List;
 import java.util.UUID;
 
 import org.apache.commons.lang.StringUtils;
-import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
-import org.bukkit.OfflinePlayer;
 import org.bukkit.command.CommandSender;
 
 import vg.civcraft.mc.civmodcore.command.CivCommand;
@@ -47,16 +45,7 @@ public class ConfigSetAnyCommand extends StandaloneCommand {
 	}
 	
 	public static UUID resolveName(String name) {
-		try {
 			return UUID.fromString(name);
-		}
-		catch (IllegalArgumentException e) {
-			OfflinePlayer offline = Bukkit.getOfflinePlayer(name);
-			if (offline == null) {
-				return null;
-			}
-			return offline.getUniqueId();
-		}
 	}
 
 	@Override

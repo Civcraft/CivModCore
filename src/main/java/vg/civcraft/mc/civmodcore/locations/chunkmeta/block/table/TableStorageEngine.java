@@ -53,7 +53,9 @@ public abstract class TableStorageEngine<D extends TableBasedDataObject>
 			break;
 		case NEW:
 			insert((D) data, coord);
-			break;		
+			break;
+		default:
+			throw new IllegalArgumentException("Data cache state unreadable!");		
 		}
 	}
 
